@@ -9,11 +9,24 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 
 class handler(BaseHTTPRequestHandler):
 
+    # Fix for 404 on Root URL (GET Request)
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        
+        response = {
+            "status": "online",
+            "message": "Pinterest AI Agent Vercel Serverless Endpoint is Active 🚀",
+            "endpoints": ["/api/save_session", "/api/run_cron"]
+        }
+        self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
+
     def do_OPTIONS(self):
-        # Full CORS preflight handler for Chrome Extension communication
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS, GET')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-goog-api-key')
         self.end_headers()
 
@@ -25,7 +38,6 @@ class handler(BaseHTTPRequestHandler):
 
             path = self.path
 
-            # Endpoint 1: Save Pinterest Session Cookie
             if '/save_session' in path or path.endswith('/save_session'):
                 user_id = data.get('user_id', 'group_member_1')
                 p_sess = data.get('pinterest_sess')
@@ -40,9 +52,7 @@ class handler(BaseHTTPRequestHandler):
                 })
                 return
 
-            # Endpoint 2: Automated Cron Execution
             elif '/run_cron' in path or path.endswith('/run_cron'):
-                # Security Check: Verify CRON_SECRET if configured in Vercel
                 auth_header = self.headers.get('Authorization', '')
                 if CRON_SECRET and auth_header != f"Bearer {CRON_SECRET}":
                     self._send_json(401, {"status": "error", "message": "Unauthorized Cron Execution."})
