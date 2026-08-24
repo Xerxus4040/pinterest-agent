@@ -1,25 +1,26 @@
 import os
 import json
 import re
+import time
+import random
 import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-# Environment Variables from Vercel Dashboard
+# Environment Variables
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 NANO_BANANA_API_KEY = os.environ.get('NANO_BANANA_API_KEY', '')
 NANO_BANANA_API_URL = os.environ.get('NANO_BANANA_API_URL', 'https://api.vyce.ai/v1/models/nano-banana/generate')
 
-# Direct REST Endpoint for Gemini 3.7 Flash
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 
+# Multi-tenant user session cache (IP or Token based)
 USER_TENANTS = {}
 
 # ---------------------------------------------------------
-# 1. Google Drive Helper
+# 1. Drive Helper
 # ---------------------------------------------------------
 def extract_folder_id(drive_url):
-    """Extracts Folder ID from Google Drive URLs"""
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', drive_url)
     if match:
         return match.group(1)
@@ -29,15 +30,14 @@ def extract_folder_id(drive_url):
     return drive_url
 
 # ---------------------------------------------------------
-# 2. Nano Banana Model Generator
+# 2. Nano Banana Image Generator (Sketch to Colourful Image)
 # ---------------------------------------------------------
 def generate_nano_banana_image(prompt, image_url=None):
-    """Calls Nano Banana API for image generation or falls back gracefully"""
     if not NANO_BANANA_API_KEY:
         return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Nano+Banana+Image"
 
     payload = {
-        "prompt": prompt,
+        "prompt": f"Turn this sketch into a colorful, highly detailed, realistic aesthetic Pinterest image: {prompt}",
         "aspect_ratio": "2:3",
         "init_image": image_url
     }
@@ -53,22 +53,18 @@ def generate_nano_banana_image(prompt, image_url=None):
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=25) as response:
+        with urllib.request.urlopen(req, timeout=30) as response:
             res = json.loads(response.read().decode('utf-8'))
-            return res.get('image_url', res.get('output', ''))
+            return res.get('image_url', res.get('output', image_url))
     except Exception:
         return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Generation+Failed"
 
 # ---------------------------------------------------------
-# 3. Gemini 3.7 Flash SEO Metadata Generator
+# 3. Gemini 3.7 Flash SEO Generator
 # ---------------------------------------------------------
 def generate_gemini_metadata(prompt_text):
-    """Calls Gemini 3.7 Flash REST API for SEO text and hashtags"""
     if not GEMINI_API_KEY:
-        return {
-            "status": "error",
-            "message": "GEMINI_API_KEY missing in Vercel Environment Variables."
-        }
+        return {"status": "error", "message": "GEMINI_API_KEY missing"}
 
     formatted_prompt = (
         f"Create high-converting Pinterest Pin SEO metadata for: '{prompt_text}'. "
@@ -79,9 +75,7 @@ def generate_gemini_metadata(prompt_text):
         "\"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\"]}"
     )
 
-    payload = {
-        "contents": [{"parts": [{"text": formatted_prompt}]}]
-    }
+    payload = {"contents": [{"parts": [{"text": formatted_prompt}]}]}
 
     req = urllib.request.Request(
         f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
@@ -96,17 +90,30 @@ def generate_gemini_metadata(prompt_text):
             ai_raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
             cleaned_text = ai_raw_text.replace('```json', '').replace('```', '').strip()
             return {"status": "success", "data": json.loads(cleaned_text)}
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8') if e.fp else str(e)
-        return {"status": "error", "message": f"Gemini HTTP {e.code}: {err_body}"}
     except Exception as e:
         return {"status": "error", "message": f"Gemini REST Error: {str(e)}"}
 
 # ---------------------------------------------------------
-# 4. Pinterest Direct Session Cookie Publisher
+# 4. Pinterest Session Validator & Direct Publisher
 # ---------------------------------------------------------
+def check_pinterest_session_validity(session_cookie):
+    """Checks if the saved _pinterest_sess cookie is active or expired"""
+    url = "https://www.pinterest.com/resource/UserResource/get/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": f"_pinterest_sess={session_cookie};"
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            if res.get("resource_response", {}).get("error") is None:
+                return True
+            return False
+    except Exception:
+        return False
+
 def create_pinterest_pin_via_session(session_cookie, board_id, image_url, title, description, link=""):
-    """Posts a pin directly using internal web endpoint and _pinterest_sess cookie"""
     url = "https://www.pinterest.com/resource/PinResource/create/"
 
     resource_data = {
@@ -121,9 +128,7 @@ def create_pinterest_pin_via_session(session_cookie, board_id, image_url, title,
         "context": {}
     }
 
-    post_data = urllib.parse.urlencode({
-        "data": json.dumps(resource_data)
-    }).encode('utf-8')
+    post_data = urllib.parse.urlencode({"data": json.dumps(resource_data)}).encode('utf-8')
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -146,12 +151,14 @@ def create_pinterest_pin_via_session(session_cookie, board_id, image_url, title,
                 }
             else:
                 err = res_body.get("resource_response", {}).get("error", {}).get("message", "Unknown Pinterest error")
+                if "authorization" in err.lower() or "login" in err.lower():
+                    return {"status": "cookie_expired", "message": "Pinterest Session Cookie Expired!"}
                 return {"status": "error", "message": f"Pinterest API Error: {err}"}
     except Exception as e:
         return {"status": "error", "message": f"Posting Error: {str(e)}"}
 
 # ---------------------------------------------------------
-# 5. Main Handler Server
+# 5. Handler Engine
 # ---------------------------------------------------------
 class handler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
@@ -169,10 +176,12 @@ class handler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        res = {"status": "success", "message": "All Systems Go (Nano Banana + Gemini 3.7 Flash + Direct Poster)"}
+        res = {"status": "success", "message": "All Engines Active (Anti-Bot + Cookie Validator Included)"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
 
     def do_POST(self):
+        client_ip = self.headers.get('X-Forwarded-For', self.client_address[0]).split(',')[0].strip()
+        
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length) if content_length > 0 else b'{}'
 
@@ -190,109 +199,93 @@ class handler(BaseHTTPRequestHandler):
         gdrive = data.get('gdrive_url', '').strip()
         sess = data.get('pinterest_sess', '').strip()
         prompt = data.get('prompt', '').strip()
-        image_url = data.get('image_url', '').strip()
         board_id = data.get('board_id', '').strip()
+        images_batch = data.get('images_batch', []) # List of direct Drive Sketch image URLs
 
-        # ACTION 1: Extension Session & Drive Link Save
+        # 1. Save Multi-tenant Session by Client IP
         if action == 'save_session' or (gdrive and sess and not action):
             folder_id = extract_folder_id(gdrive)
-            USER_TENANTS['user_main'] = {
+            USER_TENANTS[client_ip] = {
                 "gdrive_url": gdrive,
                 "folder_id": folder_id,
                 "pinterest_sess": sess
             }
+            
+            # Check Cookie Health immediately
+            is_valid = check_pinterest_session_validity(sess)
+            
             res = {
                 "status": "success",
-                "message": "Data Synced to Vercel Server",
-                "folder_id": folder_id
+                "client_ip": client_ip,
+                "folder_id": folder_id,
+                "cookie_status": "active" if is_valid else "expired_or_invalid"
             }
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 2: Nano Banana + Gemini 3.7 Flash Asset Generation Test
-        if action in ['generate_pin', 'generate_metadata']:
-            req_prompt = prompt if prompt else "Modern living room home decor"
-            generated_img = generate_nano_banana_image(req_prompt, image_url)
-            ai_seo = generate_gemini_metadata(req_prompt)
-
-            if ai_seo.get("status") == "success":
-                seo_data = ai_seo.get("data", {})
-                res = {
-                    "status": "success",
-                    "pin_asset": {
-                        "image_url": generated_img,
-                        "title": seo_data.get("title", ""),
-                        "description": seo_data.get("description", ""),
-                        "hashtags": seo_data.get("hashtags", [])
-                    }
-                }
-            else:
-                res = ai_seo
-
+        # 2. Check Session Cookie Health Status
+        if action == 'validate_cookie':
+            is_valid = check_pinterest_session_validity(sess)
+            res = {"status": "success", "is_valid": is_valid}
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 3: Direct Publish via Cookie
-        if action == 'publish_pin':
-            if not sess or not board_id or not image_url:
-                res = {"status": "error", "message": "Missing fields: pinterest_sess, board_id, image_url"}
-            else:
-                res = create_pinterest_pin_via_session(
-                    session_cookie=sess,
-                    board_id=board_id,
-                    image_url=image_url,
-                    title=data.get('title', ''),
-                    description=data.get('description', '')
-                )
-            self.wfile.write(json.dumps(res).encode('utf-8'))
-            return
-
-        # ACTION 4: FULL PIPELINE (Drive Image -> Gemini 3.7 Flash -> Nano Banana -> Pinterest Direct Post)
-        if action == 'pipe_drive_to_pinterest' or prompt:
-            req_prompt = prompt if prompt else "Modern Home Decor"
-
-            if not sess or not board_id or not image_url:
-                res = {
-                    "status": "error",
-                    "message": "Missing required fields for full pipeline: pinterest_sess, board_id, image_url"
-                }
+        # 3. Batch Auto-Posting with Anti-Bot Random Delays
+        if action == 'batch_process_drive':
+            if not sess or not board_id or not images_batch:
+                res = {"status": "error", "message": "Missing fields: pinterest_sess, board_id, images_batch"}
                 self.wfile.write(json.dumps(res).encode('utf-8'))
                 return
 
-            # Step A: Image via Nano Banana
-            final_img = generate_nano_banana_image(req_prompt, image_url)
-
-            # Step B: SEO via Gemini 3.7 Flash
-            ai_res = generate_gemini_metadata(req_prompt)
-            if ai_res.get("status") != "success":
-                self.wfile.write(json.dumps(ai_res).encode('utf-8'))
+            # Check Cookie first
+            if not check_pinterest_session_validity(sess):
+                res = {"status": "cookie_expired", "message": "Pinterest Session Cookie is expired. Please sync extension."}
+                self.wfile.write(json.dumps(res).encode('utf-8'))
                 return
 
-            seo_data = ai_res.get("data", {})
-            title = seo_data.get("title", "")
-            hashtags = " ".join(seo_data.get("hashtags", []))
-            full_description = f"{seo_data.get('description', '')}\n\n{hashtags}".strip()
+            results = []
+            total_items = len(images_batch)
 
-            # Step C: Direct Post to Pinterest
-            post_res = create_pinterest_pin_via_session(
-                session_cookie=sess,
-                board_id=board_id,
-                image_url=final_img,
-                title=title,
-                description=full_description
-            )
+            for idx, raw_image in enumerate(images_batch):
+                req_prompt = prompt if prompt else f"Creative Sketch Render {idx+1}"
 
-            res = {
-                "status": post_res.get("status"),
-                "pipeline": {
-                    "image_url": final_img,
-                    "title": title,
-                    "description": full_description,
-                    "target_board_id": board_id,
-                    "result": post_res
-                }
-            }
-            self.wfile.write(json.dumps(res).encode('utf-8'))
+                # Step A: Nano Banana Sketch-to-Colourful Image
+                colourful_img = generate_nano_banana_image(req_prompt, raw_image)
+
+                # Step B: Gemini 3.7 Flash SEO Generation
+                ai_res = generate_gemini_metadata(req_prompt)
+                if ai_res.get("status") == "success":
+                    seo_data = ai_res.get("data", {})
+                    title = seo_data.get("title", "")
+                    hashtags = " ".join(seo_data.get("hashtags", []))
+                    full_desc = f"{seo_data.get('description', '')}\n\n{hashtags}".strip()
+                else:
+                    title = f"Sketch Design #{idx+1}"
+                    full_desc = "Beautiful Sketch to Image Conversion #Art #Design"
+
+                # Step C: Direct Post
+                post_res = create_pinterest_pin_via_session(
+                    session_cookie=sess,
+                    board_id=board_id,
+                    image_url=colourful_img,
+                    title=title,
+                    description=full_desc
+                )
+
+                results.append({
+                    "item_index": idx + 1,
+                    "sketch_url": raw_image,
+                    "rendered_url": colourful_img,
+                    "status": post_res.get("status"),
+                    "pin_url": post_res.get("pin_url", "")
+                })
+
+                # Anti-Bot Protection Delay (If not last item)
+                if idx < total_items - 1:
+                    sleep_time = random.randint(30, 60) # 30 to 60 sec random wait
+                    time.sleep(sleep_time)
+
+            self.wfile.write(json.dumps({"status": "success", "processed_batch": results}).encode('utf-8'))
             return
 
         res = {"status": "error", "message": "Invalid Action Request"}
