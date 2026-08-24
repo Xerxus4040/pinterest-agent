@@ -3,12 +3,13 @@ import json
 import re
 import urllib.request
 from http.server import BaseHTTPRequestHandler
+from google import genai
 
-# Environment Variable from Vercel Dashboard
+# Environment Variables from Vercel Dashboard
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-
-# Standard Stable Gemini API Endpoint
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+NANO_BANANA_API_KEY = os.environ.get('NANO_BANANA_API_KEY', '')
+# Replace with your actual Nano Banana / Image Model Endpoint
+NANO_BANANA_API_URL = os.environ.get('NANO_BANANA_API_URL', 'https://api.vyce.ai/v1/models/nano-banana/generate')
 
 USER_TENANTS = {}
 
@@ -22,53 +23,69 @@ def extract_folder_id(drive_url):
         return match_id.group(1)
     return drive_url
 
-def call_gemini_text(prompt_text):
-    """Calls Gemini 1.5 Flash API to generate Pinterest SEO Content"""
-    if not GEMINI_API_KEY:
-        return {
-            "status": "error", 
-            "message": "GEMINI_API_KEY is missing in Vercel Environment Variables."
-        }
-
-    formatted_prompt = (
-        f"Create high-converting Pinterest Pin SEO metadata for topic: '{prompt_text}'. "
-        "Return strictly valid raw JSON only without markdown formatting like ```json. "
-        "JSON structure must be: "
-        "{\"title\": \"Catchy title under 100 chars\", "
-        "\"description\": \"Engaging description under 500 chars with CTA\", "
-        "\"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\"]}"
-    )
+def generate_nano_banana_image(prompt, image_url=None):
+    """
+    Calls Nano Banana Model for Image Generation or Style Transfer.
+    If NANO_BANANA_API_KEY is not set, falls back to the provided image_url.
+    """
+    if not NANO_BANANA_API_KEY:
+        # Fallback if Nano Banana API key isn't provided: return input image or placeholder
+        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Nano+Banana+Image"
 
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": formatted_prompt}
-                ]
-            }
-        ]
+        "prompt": prompt,
+        "aspect_ratio": "2:3",  # Pinterest optimal vertical ratio
+        "init_image": image_url
     }
 
     req = urllib.request.Request(
-        f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+        NANO_BANANA_API_URL,
         data=json.dumps(payload).encode('utf-8'),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {NANO_BANANA_API_KEY}"
+        },
         method="POST"
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            res_json = json.loads(response.read().decode('utf-8'))
-            ai_raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
-            
-            cleaned_text = ai_raw_text.replace('```json', '').replace('```', '').strip()
-            return {"status": "success", "data": json.loads(cleaned_text)}
-            
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8') if e.fp else str(e)
-        return {"status": "error", "message": f"Gemini HTTP Error {e.code}: {err_body}"}
+        with urllib.request.urlopen(req, timeout=30) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            return res.get('image_url', res.get('output', ''))
     except Exception as e:
-        return {"status": "error", "message": f"Gemini Processing Error: {str(e)}"}
+        print(f"Nano Banana API Error: {str(e)}")
+        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Generation+Failed"
+
+def generate_gemini_metadata(prompt_text):
+    """Calls Gemini 3.7 Flash for SEO Metadata Generation"""
+    if not GEMINI_API_KEY:
+        return {
+            "status": "error",
+            "message": "GEMINI_API_KEY missing in Vercel Environment Variables."
+        }
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        formatted_prompt = (
+            f"Create high-converting Pinterest Pin SEO metadata for: '{prompt_text}'. "
+            "Return strictly valid raw JSON only without markdown codeblocks or formatting. "
+            "JSON structure: "
+            "{\"title\": \"Catchy title under 100 chars\", "
+            "\"description\": \"Engaging description under 500 chars with call to action\", "
+            "\"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\"]}"
+        )
+
+        response = client.models.generate_content(
+            model='gemini-3.7-flash',
+            contents=formatted_prompt,
+        )
+
+        cleaned_text = response.text.replace('```json', '').replace('```', '').strip()
+        return {"status": "success", "data": json.loads(cleaned_text)}
+
+    except Exception as e:
+        return {"status": "error", "message": f"Gemini Error: {str(e)}"}
 
 class handler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
@@ -86,13 +103,13 @@ class handler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        res = {"status": "success", "message": "Pinterest AI Backend Online"}
+        res = {"status": "success", "message": "Dual-Engine Pipeline Ready (Nano Banana + Gemini 3.7 Flash)"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
 
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-        
+
         try:
             data = json.loads(body.decode('utf-8'))
         except Exception:
@@ -107,32 +124,50 @@ class handler(BaseHTTPRequestHandler):
         gdrive = data.get('gdrive_url', '').strip()
         sess = data.get('pinterest_sess', '').strip()
         prompt = data.get('prompt', '').strip()
+        image_url = data.get('image_url', '').strip()
 
-        # Action 1: Extension Session Sync
+        # Action 1: Save Session & Drive
         if action == 'save_session' or (gdrive and sess):
             folder_id = extract_folder_id(gdrive)
             USER_TENANTS['user_main'] = {
-                "gdrive_url": gdrive, 
+                "gdrive_url": gdrive,
                 "folder_id": folder_id,
                 "pinterest_sess": sess
             }
             res = {
-                "status": "success", 
+                "status": "success",
                 "message": "Data Synced to Vercel Server",
                 "folder_id": folder_id
             }
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # Action 2: Gemini AI Content Generation
-        if action == 'generate_metadata' or prompt:
-            test_prompt = prompt if prompt else "Modern kitchen home decor"
-            ai_res = call_gemini_text(test_prompt)
-            self.wfile.write(json.dumps(ai_res).encode('utf-8'))
+        # Action 2: Multi-Model Processing (Nano Banana + Gemini 3.7 Flash)
+        if action in ['generate_pin', 'generate_metadata'] or prompt:
+            req_prompt = prompt if prompt else "Modern living room home decor"
+
+            # 1. Image Generation via Nano Banana
+            generated_img = generate_nano_banana_image(req_prompt, image_url)
+
+            # 2. Text/SEO Generation via Gemini 3.7 Flash
+            ai_seo = generate_gemini_metadata(req_prompt)
+
+            if ai_seo.get("status") == "success":
+                seo_data = ai_seo.get("data", {})
+                res = {
+                    "status": "success",
+                    "pin_asset": {
+                        "image_url": generated_img,
+                        "title": seo_data.get("title", ""),
+                        "description": seo_data.get("description", ""),
+                        "hashtags": seo_data.get("hashtags", [])
+                    }
+                }
+            else:
+                res = ai_seo
+
+            self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        res = {
-            "status": "error", 
-            "message": "Invalid Request Action"
-        }
+        res = {"status": "error", "message": "Invalid Action Request"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
