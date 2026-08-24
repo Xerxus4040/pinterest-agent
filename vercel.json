@@ -1,10 +1,4 @@
 {
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/api/index.py"
-    }
-  ],
   "crons": [
     {
       "path": "/api/run_cron",
