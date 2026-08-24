@@ -6,19 +6,15 @@ import urllib.request
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
 
-# Global Multi-Tenant User Database (In-Memory Isolation)
 USER_TENANTS = {}
 
 def extract_gdrive_folder_id(url):
-    """ Extracts clean Google Drive folder ID from full share link """
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', url)
     return match.group(1) if match else None
 
 def parse_latest_image_from_gdrive(folder_id):
-    """ Generates a direct image download stream URL for Gemini """
     if not folder_id:
         return "https://images.unsplash.com/photo-1584917865442-de89df76afd3"
-    # Placeholder: In production, returns direct image file stream link from public folder ID
     return f"https://drive.google.com/uc?export=view&id={folder_id}"
 
 def app(environ, start_response):
@@ -36,10 +32,29 @@ def app(environ, start_response):
         start_response('200 OK', headers)
         return [b'']
 
+    # Handle GET requests for testing in browser directly
     if method == 'GET':
         start_response('200 OK', headers)
-        return [json.dumps({"status": "online", "system": "Multi-Tenant Agent Core Running 🚀"}).encode('utf-8')]
+        
+        if '/save_session' in path:
+            return [json.dumps({
+                "status": "info", 
+                "message": "This endpoint requires a POST request with 'gdrive_url' and 'pinterest_sess' JSON payload."
+            }).encode('utf-8')]
+            
+        elif '/run_cron' in path:
+            return [json.dumps({
+                "status": "active", 
+                "message": "Cron worker endpoint is online. Run POST/Cron trigger to execute AI agent pipeline."
+            }).encode('utf-8')]
 
+        return [json.dumps({
+            "status": "online", 
+            "system": "Pinterest Multi-Tenant AI Agent Core Active 🚀",
+            "available_endpoints": ["/api/save_session", "/api/run_cron"]
+        }).encode('utf-8')]
+
+    # Handle POST requests from Extension Sync
     if method == 'POST':
         try:
             length = int(environ.get('CONTENT_LENGTH', 0))
@@ -48,7 +63,6 @@ def app(environ, start_response):
         except Exception:
             data = {}
 
-        # 1. Endpoint: Sync Client GDrive & Cookie
         if '/save_session' in path or path.endswith('/save_session'):
             gdrive_url = data.get('gdrive_url', '')
             p_sess = data.get('pinterest_sess', '')
@@ -58,9 +72,8 @@ def app(environ, start_response):
                 return [json.dumps({"status": "error", "message": "Missing cookie or Google Drive Link."}).encode('utf-8')]
 
             folder_id = extract_gdrive_folder_id(gdrive_url)
+            client_id = p_sess[:15]
             
-            # Isolated storage per client/session key
-            client_id = p_sess[:15] # Short hash identifier
             USER_TENANTS[client_id] = {
                 "gdrive_url": gdrive_url,
                 "folder_id": folder_id,
@@ -73,15 +86,12 @@ def app(environ, start_response):
                 "message": "Client Configuration & Pinterest Session Synced to Agent System!"
             }).encode('utf-8')]
 
-        # 2. Endpoint: Vercel Daily Cron Worker
         elif '/run_cron' in path or path.endswith('/run_cron'):
             if not GEMINI_API_KEY:
                 start_response('500 Internal Server Error', headers)
                 return [json.dumps({"status": "error", "message": "Master GEMINI_API_KEY missing in Vercel Env."}).encode('utf-8')]
 
             executions = []
-            
-            # If no client registered yet, run system test payload
             targets = USER_TENANTS if USER_TENANTS else {"default": {"folder_id": None, "pinterest_sess": "mock"}}
 
             for client_id, tenant in targets.items():
