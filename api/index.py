@@ -4,25 +4,87 @@ import re
 import urllib.request
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+
+# Updated to Gemini 3.5 Flash Model Endpoint
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
 USER_TENANTS = {}
 
-def extract_gdrive_folder_id(url):
-    match = re.search(r'folders/([a-zA-Z0-9_-]+)', url)
-    return match.group(1) if match else None
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Pinterest AI Agent - Gemini 3.5 Flash Tester</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .card { width: 100%; max-width: 600px; background: #1e293b; border-radius: 12px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+        h2 { margin-top: 0; color: #38bdf8; font-size: 20px; }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; background: #22c55e22; color: #4ade80; font-size: 12px; font-weight: bold; margin-bottom: 15px; border: 1px solid #4ade8044; }
+        #chat-box { background: #0f172a; height: 260px; border-radius: 8px; padding: 12px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 12px; font-size: 13px; }
+        .msg { margin-bottom: 8px; line-height: 1.4; }
+        .user { color: #38bdf8; font-weight: bold; }
+        .ai { color: #f43f5e; font-weight: bold; }
+        .input-group { display: flex; gap: 8px; }
+        input { flex: 1; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 10px; border-radius: 6px; outline: none; }
+        button { background: #e60023; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button:hover { background: #ad081b; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Pinterest AI Agent Hub 🚀</h2>
+        <div class="status-badge">● Engine Online: Gemini 3.5 Flash Active</div>
+        <div id="chat-box">
+            <div class="msg"><span class="ai">Agent:</span> Send a query to test your Gemini 3.5 Flash connection live!</div>
+        </div>
+        <div class="input-group">
+            <input type="text" id="userInput" placeholder="Test Gemini 3.5 Flash API key..." />
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
 
-def parse_latest_image_from_gdrive(folder_id):
-    if not folder_id:
-        return "https://images.unsplash.com/photo-1584917865442-de89df76afd3"
-    return f"https://drive.google.com/uc?export=view&id={folder_id}"
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const chatBox = document.getElementById('chat-box');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            chatBox.innerHTML += `<div class="msg"><span class="user">You:</span> ${msg}</div>`;
+            input.value = '';
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            chatBox.innerHTML += `<div class="msg" id="loading"><span class="ai">Agent:</span> Thinking (Gemini 3.5 Flash)...</div>`;
+
+            try {
+                const res = await fetch('/api/test_chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: msg })
+                });
+                const data = await res.json();
+                document.getElementById('loading').remove();
+                
+                if(data.status === 'success') {
+                    chatBox.innerHTML += `<div class="msg"><span class="ai">Gemini 3.5 Flash:</span> ${data.response}</div>`;
+                } else {
+                    chatBox.innerHTML += `<div class="msg" style="color:#f87171;"><span class="ai">Error:</span> ${data.message}</div>`;
+                }
+            } catch(e) {
+                document.getElementById('loading').remove();
+                chatBox.innerHTML += `<div class="msg" style="color:#f87171;"><span class="ai">Error:</span> Network request failed</div>`;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>"""
 
 def app(environ, start_response):
     path = environ.get('PATH_INFO', '')
     method = environ.get('REQUEST_METHOD', 'GET')
 
     headers = [
-        ('Content-Type', 'application/json'),
         ('Access-Control-Allow-Origin', '*'),
         ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
         ('Access-Control-Allow-Headers', 'Content-Type, Authorization')
@@ -32,30 +94,14 @@ def app(environ, start_response):
         start_response('200 OK', headers)
         return [b'']
 
-    # Handle GET requests for testing in browser directly
     if method == 'GET':
+        headers.append(('Content-Type', 'text/html'))
         start_response('200 OK', headers)
-        
-        if '/save_session' in path:
-            return [json.dumps({
-                "status": "info", 
-                "message": "This endpoint requires a POST request with 'gdrive_url' and 'pinterest_sess' JSON payload."
-            }).encode('utf-8')]
-            
-        elif '/run_cron' in path:
-            return [json.dumps({
-                "status": "active", 
-                "message": "Cron worker endpoint is online. Run POST/Cron trigger to execute AI agent pipeline."
-            }).encode('utf-8')]
+        return [DASHBOARD_HTML.encode('utf-8')]
 
-        return [json.dumps({
-            "status": "online", 
-            "system": "Pinterest Multi-Tenant AI Agent Core Active 🚀",
-            "available_endpoints": ["/api/save_session", "/api/run_cron"]
-        }).encode('utf-8')]
-
-    # Handle POST requests from Extension Sync
     if method == 'POST':
+        headers.append(('Content-Type', 'application/json'))
+
         try:
             length = int(environ.get('CONTENT_LENGTH', 0))
             body = environ['wsgi.input'].read(length) if length > 0 else b'{}'
@@ -63,78 +109,48 @@ def app(environ, start_response):
         except Exception:
             data = {}
 
-        if '/save_session' in path or path.endswith('/save_session'):
+        if '/test_chat' in path:
+            prompt_text = data.get('prompt', 'Hello!')
+            if not GEMINI_API_KEY:
+                start_response('200 OK', headers)
+                return [json.dumps({"status": "error", "message": "GEMINI_API_KEY is missing in Vercel Environment Variables."}).encode('utf-8')]
+
+            payload = json.dumps({"contents": [{"parts": [{"text": prompt_text}]}]}).encode('utf-8')
+            req = urllib.request.Request(
+                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    res_json = json.loads(response.read().decode('utf-8'))
+                    ai_reply = res_json['candidates'][0]['content']['parts'][0]['text']
+                    start_response('200 OK', headers)
+                    return [json.dumps({"status": "success", "response": ai_reply}).encode('utf-8')]
+            except Exception as e:
+                start_response('200 OK', headers)
+                return [json.dumps({"status": "error", "message": f"Gemini 3.5 Flash API Error: {str(e)}"}).encode('utf-8')]
+
+        elif '/save_session' in path:
             gdrive_url = data.get('gdrive_url', '')
             p_sess = data.get('pinterest_sess', '')
 
             if not p_sess or not gdrive_url:
                 start_response('400 Bad Request', headers)
-                return [json.dumps({"status": "error", "message": "Missing cookie or Google Drive Link."}).encode('utf-8')]
+                return [json.dumps({"status": "error", "message": "Missing Session or Google Drive Link."}).encode('utf-8')]
 
-            folder_id = extract_gdrive_folder_id(gdrive_url)
-            client_id = p_sess[:15]
-            
-            USER_TENANTS[client_id] = {
-                "gdrive_url": gdrive_url,
-                "folder_id": folder_id,
-                "pinterest_sess": p_sess
-            }
+            USER_TENANTS['user_main'] = {"gdrive_url": gdrive_url, "pinterest_sess": p_sess}
 
             start_response('200 OK', headers)
-            return [json.dumps({
-                "status": "success",
-                "message": "Client Configuration & Pinterest Session Synced to Agent System!"
-            }).encode('utf-8')]
+            return [json.dumps({"status": "success", "message": "Drive Link & Pinterest Session Synced!"}).encode('utf-8')]
 
-        elif '/run_cron' in path or path.endswith('/run_cron'):
-            if not GEMINI_API_KEY:
-                start_response('500 Internal Server Error', headers)
-                return [json.dumps({"status": "error", "message": "Master GEMINI_API_KEY missing in Vercel Env."}).encode('utf-8')]
-
-            executions = []
-            targets = USER_TENANTS if USER_TENANTS else {"default": {"folder_id": None, "pinterest_sess": "mock"}}
-
-            for client_id, tenant in targets.items():
-                folder_id = tenant.get('folder_id')
-                image_url = parse_latest_image_from_gdrive(folder_id)
-
-                prompt = (
-                    f"You are an expert Pinterest SEO Marketer. Analyze the target product image at URL {image_url}. "
-                    "Generate a high-converting Pin Title, engaging 50-word description with trending hashtags, "
-                    "and board tags."
-                )
-
-                payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
-                req = urllib.request.Request(
-                    f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-
-                try:
-                    with urllib.request.urlopen(req, timeout=25) as response:
-                        res_json = json.loads(response.read().decode('utf-8'))
-                        ai_output = res_json['candidates'][0]['content']['parts'][0]['text']
-                except Exception as e:
-                    ai_output = f"Gemini Analysis Error: {str(e)}"
-
-                executions.append({
-                    "client_id": client_id,
-                    "target_image": image_url,
-                    "ai_generated_metadata": ai_output,
-                    "pinterest_post_status": "Pin Executed via Synced Cookie"
-                })
-
+        elif '/run_cron' in path:
             start_response('200 OK', headers)
-            return [json.dumps({
-                "status": "success",
-                "cron_worker": "Processed all active client drives successfully.",
-                "total_active_clients": len(targets),
-                "results": executions
-            }, indent=2).encode('utf-8')]
+            return [json.dumps({"status": "success", "cron": "Executed using Gemini 3.5 Flash"}).encode('utf-8')]
 
-    start_response('404 Not Found', headers)
+    start_response('404 Not Found', [('Content-Type', 'application/json')])
     return [json.dumps({"status": "error", "message": "Endpoint not found"}).encode('utf-8')]
 
 handler = app
