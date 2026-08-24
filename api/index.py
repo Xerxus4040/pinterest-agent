@@ -199,21 +199,21 @@ class handler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length) if content_length > 0 else b'{}'
 
         try:
-            data = json.loads(body.decode('utf-8'))
+            payload = json.loads(body.decode('utf-8'))
         except Exception:
-            data = {}
+            payload = {}
 
         self.send_response(200)
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
 
-        action = data.get('action', '')
-        gdrive = data.get('gdrive_url', '').strip()
-        sess = data.get('pinterest_sess', '').strip()
-        board_id = data.get('board_id', '').strip()
-        prompt = data.get('prompt', 'Modern Home Interior').strip()
-        images_batch = data.get('images_batch', [])
+        action = payload.get('action', '')
+        gdrive = payload.get('gdrive_url', '').strip()
+        sess = payload.get('pinterest_sess', '').strip()
+        board_id = payload.get('board_id', '').strip()
+        prompt = payload.get('prompt', 'Modern Home Interior').strip()
+        images_batch = payload.get('images_batch', [])
 
         # ACTION 1: Fetch Pinterest Boards Automatically
         if action == "fetch_boards":
@@ -233,14 +233,48 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 3: Batch Auto-Process Drive Sketches -> Nano Banana -> Gemini SEO -> Pinterest
+        # ACTION 3: Generate Single Pin (cURL / Direct Test Endpoint)
+        if action == "generate_pin":
+            sketch_url = payload.get("image_url", None)
+            
+            # Step A: Nano Banana AI Image Generation
+            rendered_image = generate_nano_banana_image(prompt, sketch_url)
+
+            # Step B: Gemini 3.7 Flash SEO Generation
+            seo_data = generate_gemini_metadata(prompt)
+
+            # Option to auto-post if cookie & board_id are provided
+            post_result = None
+            if sess and board_id:
+                title = seo_data.get("title", "")
+                hashtags = " ".join(seo_data.get("hashtags", []))
+                full_desc = f"{seo_data.get('description', '')}\n\n{hashtags}".strip()
+                post_result = create_pinterest_pin_via_session(
+                    session_cookie=sess,
+                    board_id=board_id,
+                    image_url=rendered_image,
+                    title=title,
+                    description=full_desc
+                )
+
+            res = {
+                "status": "success",
+                "action": "generate_pin",
+                "prompt": prompt,
+                "generated_image": rendered_image,
+                "seo": seo_data,
+                "pinterest_post_result": post_result
+            }
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+            return
+
+        # ACTION 4: Batch Auto-Process Drive Sketches -> Nano Banana -> Gemini SEO -> Pinterest
         if action == 'batch_process_drive':
             if not sess or not board_id:
                 res = {"status": "error", "message": "Missing session cookie or board id"}
                 self.wfile.write(json.dumps(res).encode('utf-8'))
                 return
 
-            # Dummy or received sketch items fallback
             if not images_batch:
                 images_batch = ["https://via.placeholder.com/1000x1500.png?text=Drive+Sketch+Item"]
 
