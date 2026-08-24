@@ -7,13 +7,12 @@ import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-# Environment Variables from Vercel Dashboard
+# Single Google AI Studio API Key from Vercel Dashboard
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-NANO_BANANA_API_KEY = os.environ.get('NANO_BANANA_API_KEY', '')
-NANO_BANANA_API_URL = os.environ.get('NANO_BANANA_API_URL', 'https://api.vyce.ai/v1/models/nano-banana/generate')
 
-# Gemini 3.7 Flash REST Endpoint
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+# Google AI Studio REST Endpoints
+GEMINI_37_FLASH_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+IMAGEN_3_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
 
 # ---------------------------------------------------------
 # 1. Google Drive Helper
@@ -29,34 +28,50 @@ def extract_folder_id(drive_url):
     return drive_url
 
 # ---------------------------------------------------------
-# 2. Nano Banana Model Generator (Sketch to Colourful Image)
+# 2. Google Imagen 3 Model Generator (Using Single Google Key)
 # ---------------------------------------------------------
-def generate_nano_banana_image(prompt, image_url=None):
-    """Calls Nano Banana API for high-quality aesthetic image rendering"""
-    if not NANO_BANANA_API_KEY:
-        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Nano+Banana+Image"
+def generate_ai_image(prompt, image_url=None):
+    """Generates High-Quality Aesthetic Images using Google Imagen 3 API"""
+    if not GEMINI_API_KEY:
+        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Missing+Google+API+Key"
+
+    endpoint = f"{IMAGEN_3_URL}?key={GEMINI_API_KEY}"
 
     payload = {
-        "prompt": f"Turn this sketch into a colorful, highly detailed, realistic aesthetic Pinterest image: {prompt}",
-        "aspect_ratio": "2:3",
-        "init_image": image_url
+        "instances": [
+            {"prompt": f"A aesthetic, highly detailed, professional Pinterest photography of: {prompt}, 8k resolution, vertical ratio"}
+        ],
+        "parameters": {
+            "sampleCount": 1,
+            "aspectRatio": "3:4"
+        }
     }
 
     req = urllib.request.Request(
-        NANO_BANANA_API_URL,
+        endpoint,
         data=json.dumps(payload).encode('utf-8'),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {NANO_BANANA_API_KEY}"
-        },
+        headers={"Content-Type": "application/json"},
         method="POST"
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=35) as response:
             res = json.loads(response.read().decode('utf-8'))
-            return res.get('image_url', res.get('output', image_url))
-    except Exception:
+            predictions = res.get('predictions', [])
+            
+            if predictions and 'bytesBase64Encoded' in predictions[0]:
+                base64_data = predictions[0]['bytesBase64Encoded']
+                return f"data:image/jpeg;base64,{base64_data}"
+            elif predictions and 'gcsUri' in predictions[0]:
+                return predictions[0]['gcsUri']
+            elif predictions and 'mimeType' in predictions[0]:
+                # Fallback format handling
+                b64 = predictions[0].get('bytesBase64Encoded', '')
+                return f"data:image/png;base64,{b64}"
+                
+            return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Imagen+Generated"
+    except Exception as e:
+        print(f"Imagen 3 API Error: {e}")
         return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Generation+Failed"
 
 # ---------------------------------------------------------
@@ -67,7 +82,7 @@ def generate_gemini_metadata(prompt_text):
     if not GEMINI_API_KEY:
         return {
             "title": "Stunning Pinterest Design Inspiration",
-            "description": f"Explore creative design ideas for {prompt_text}. Perfect for home decor and styling! #HomeDecor #Design",
+            "description": f"Explore creative design ideas for {prompt_text}. Perfect for home decor! #HomeDecor #Design",
             "hashtags": ["#HomeDecor", "#Design", "#Inspiration"]
         }
 
@@ -83,7 +98,7 @@ def generate_gemini_metadata(prompt_text):
     payload = {"contents": [{"parts": [{"text": formatted_prompt}]}]}
 
     req = urllib.request.Request(
-        f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+        f"{GEMINI_37_FLASH_URL}?key={GEMINI_API_KEY}",
         data=json.dumps(payload).encode('utf-8'),
         headers={"Content-Type": "application/json"},
         method="POST"
@@ -95,15 +110,16 @@ def generate_gemini_metadata(prompt_text):
             ai_raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
             cleaned_text = ai_raw_text.replace('```json', '').replace('```', '').strip()
             return json.loads(cleaned_text)
-    except Exception:
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
         return {
-            "title": "Creative Home Inspiration",
-            "description": f"Discover amazing ideas inspired by {prompt_text} #Design #Inspiration",
-            "hashtags": ["#Design", "#Inspiration"]
+            "title": f"Minimalist {prompt_text} Ideas",
+            "description": f"Discover modern aesthetic ideas for {prompt_text}. Click to see complete guide!",
+            "hashtags": ["#HomeDecor", "#InteriorDesign", "#Scandinavian"]
         }
 
 # ---------------------------------------------------------
-# 4. Pinterest Session, Board Fetcher & Direct Publisher
+# 4. Pinterest Session, Board Fetcher & Publisher
 # ---------------------------------------------------------
 def fetch_user_pinterest_boards(sess_cookie):
     """Fetches list of boards automatically using user session cookie"""
@@ -191,7 +207,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        res = {"status": "success", "message": "All Systems Go (Drive + Nano Banana AI + Gemini 3.7 Flash + Pinterest Direct)"}
+        res = {"status": "success", "message": "All Systems Operational (Gemini 3.7 Flash + Google Imagen 3 + Pinterest Engine)"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
 
     def do_POST(self):
@@ -225,25 +241,21 @@ class handler(BaseHTTPRequestHandler):
         # ACTION 2: Save Session & Settings
         if action == 'save_session' or (gdrive and sess and not action):
             folder_id = extract_folder_id(gdrive)
-            res = {
-                "status": "success",
-                "message": "Settings Synced Successfully",
-                "folder_id": folder_id
-            }
+            res = {"status": "success", "message": "Settings Synced Successfully", "folder_id": folder_id}
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 3: Generate Single Pin (cURL / Direct Test Endpoint)
+        # ACTION 3: Generate Single Pin (cURL / Extension Test Endpoint)
         if action == "generate_pin":
             sketch_url = payload.get("image_url", None)
             
-            # Step A: Nano Banana AI Image Generation
-            rendered_image = generate_nano_banana_image(prompt, sketch_url)
+            # Step A: Google Imagen 3 Image Generation
+            rendered_image = generate_ai_image(prompt, sketch_url)
 
             # Step B: Gemini 3.7 Flash SEO Generation
             seo_data = generate_gemini_metadata(prompt)
 
-            # Option to auto-post if cookie & board_id are provided
+            # Step C: Optional Auto-Post if Session & Board provided
             post_result = None
             if sess and board_id:
                 title = seo_data.get("title", "")
@@ -268,7 +280,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 4: Batch Auto-Process Drive Sketches -> Nano Banana -> Gemini SEO -> Pinterest
+        # ACTION 4: Batch Auto-Process Drive Sketches -> Pinterest
         if action == 'batch_process_drive':
             if not sess or not board_id:
                 res = {"status": "error", "message": "Missing session cookie or board id"}
@@ -284,16 +296,12 @@ class handler(BaseHTTPRequestHandler):
             for idx, raw_image in enumerate(images_batch):
                 req_prompt = f"{prompt} variation {idx+1}"
 
-                # Step A: Nano Banana AI Sketch-to-Colourful Conversion
-                colourful_img = generate_nano_banana_image(req_prompt, raw_image)
-
-                # Step B: Gemini 3.7 Flash SEO Title, Description, & Hashtags Generation
+                colourful_img = generate_ai_image(req_prompt, raw_image)
                 seo = generate_gemini_metadata(req_prompt)
                 title = seo.get("title", "Stunning Design")
                 hashtags = " ".join(seo.get("hashtags", []))
                 full_desc = f"{seo.get('description', '')}\n\n{hashtags}".strip()
 
-                # Step C: Direct Post to Pinterest
                 post_res = create_pinterest_pin_via_session(
                     session_cookie=sess,
                     board_id=board_id,
@@ -309,7 +317,6 @@ class handler(BaseHTTPRequestHandler):
                     "pin_url": post_res.get("pin_url", "")
                 })
 
-                # Anti-Bot Random Delay (30 to 60 seconds between posts)
                 if idx < total_items - 1:
                     time.sleep(random.randint(30, 60))
 
