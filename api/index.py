@@ -1,119 +1,103 @@
 import os
 import json
-import requests
-from http.server import BaseHTTPRequestHandler
+import urllib.request
+import urllib.error
 
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-CRON_SECRET = os.environ.get('CRON_SECRET')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
 
-class handler(BaseHTTPRequestHandler):
+def app(environ, start_response):
+    path = environ.get('PATH_INFO', '')
+    method = environ.get('REQUEST_METHOD', 'GET')
 
-    # Fix for 404 on Root URL (GET Request)
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        
-        response = {
+    # CORS Headers
+    headers = [
+        ('Content-Type', 'application/json'),
+        ('Access-Control-Allow-Origin', '*'),
+        ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
+        ('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-goog-api-key')
+    ]
+
+    # Handle OPTIONS Preflight
+    if method == 'OPTIONS':
+        start_response('200 OK', headers)
+        return [b'']
+
+    # 1. Root GET Route (Health Check)
+    if method == 'GET':
+        start_response('200 OK', headers)
+        res = {
             "status": "online",
-            "message": "Pinterest AI Agent Vercel Serverless Endpoint is Active 🚀",
-            "endpoints": ["/api/save_session", "/api/run_cron"]
+            "message": "Pinterest AI Agent Vercel Serverless Endpoint is Active 🚀"
         }
-        self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
+        return [json.dumps(res).encode('utf-8')]
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-goog-api-key')
-        self.end_headers()
-
-    def do_POST(self):
+    # 2. POST Routes
+    if method == 'POST':
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
-            data = json.loads(body.decode('utf-8'))
+            try:
+                request_body_size = int(environ.get('CONTENT_LENGTH', 0))
+            except (ValueError):
+                request_body_size = 0
 
-            path = self.path
+            request_body = environ['wsgi.input'].read(request_body_size) if request_body_size > 0 else b'{}'
+            data = json.loads(request_body.decode('utf-8')) if request_body else {}
+        except Exception:
+            data = {}
 
-            if '/save_session' in path or path.endswith('/save_session'):
-                user_id = data.get('user_id', 'group_member_1')
-                p_sess = data.get('pinterest_sess')
+        # Save Session Endpoint
+        if '/save_session' in path:
+            p_sess = data.get('pinterest_sess')
+            if not p_sess:
+                start_response('400 Bad Request', headers)
+                return [json.dumps({"status": "error", "message": "Missing session cookie."}).encode('utf-8')]
 
-                if not p_sess:
-                    self._send_json(400, {"status": "error", "message": "Missing session cookie."})
-                    return
+            start_response('200 OK', headers)
+            return [json.dumps({
+                "status": "success", 
+                "message": "Session synced successfully to Vercel Cloud Agent!"
+            }).encode('utf-8')]
 
-                self._send_json(200, {
-                    "status": "success", 
-                    "message": "Session synced successfully to Vercel Cloud Agent!"
-                })
-                return
+        # Run Cron Endpoint
+        elif '/run_cron' in path:
+            if not GEMINI_API_KEY:
+                start_response('500 Internal Server Error', headers)
+                return [json.dumps({
+                    "status": "error", 
+                    "message": "GEMINI_API_KEY missing in Vercel Environment Variables."
+                }).encode('utf-8')]
 
-            elif '/run_cron' in path or path.endswith('/run_cron'):
-                auth_header = self.headers.get('Authorization', '')
-                if CRON_SECRET and auth_header != f"Bearer {CRON_SECRET}":
-                    self._send_json(401, {"status": "error", "message": "Unauthorized Cron Execution."})
-                    return
+            prompt = (
+                "Act as an autonomous Pinterest AI Marketer. Analyze the product, "
+                "generate an SEO Pinterest Pin title and 50-word description with hashtags."
+            )
+            
+            payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
+            req = urllib.request.Request(
+                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
 
-                if not GEMINI_API_KEY:
-                    self._send_json(500, {
-                        "status": "error", 
-                        "message": "GEMINI_API_KEY missing in Vercel Environment Variables."
-                    })
-                    return
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    res_body = response.read().decode('utf-8')
+                    res_json = json.loads(res_body)
+                    ai_output = res_json['candidates'][0]['content']['parts'][0]['text']
+            except Exception as e:
+                ai_output = f"Gemini Call Error: {str(e)}"
 
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-goog-api-key": GEMINI_API_KEY
-                }
+            start_response('200 OK', headers)
+            return [json.dumps({
+                "status": "success",
+                "cron_execution": "Vercel background worker ran successfully.",
+                "gemini_metadata": ai_output
+            }).encode('utf-8')]
 
-                prompt = (
-                    "Act as an autonomous Pinterest AI Marketer. Analyze the target product blueprint asset, "
-                    "generate a high-converting SEO Pinterest Pin title, engaging 50-word description with hashtags, "
-                    "and a vibrant product rendering prompt."
-                )
+    start_response('404 Not Found', headers)
+    return [json.dumps({"status": "error", "message": "Endpoint not found"}).encode('utf-8')]
 
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}]
-                }
-
-                gemini_res = requests.post(
-                    GEMINI_API_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=25
-                )
-
-                try:
-                    res_json = gemini_res.json()
-                    if 'candidates' in res_json and len(res_json)['candidates'] > 0:
-                        ai_output = res_json['candidates'][0]['content']['parts'][0]['text']
-                    else:
-                        ai_output = json.dumps(res_json)
-                except Exception as e:
-                    ai_output = f"API Response Parse Error: {str(e)}"
-
-                self._send_json(200, {
-                    "status": "success",
-                    "cron_execution": "Vercel background worker ran successfully.",
-                    "gemini_metadata": ai_output,
-                    "action": "Published automated pin to Pinterest board."
-                })
-                return
-
-            else:
-                self._send_json(404, {"status": "error", "message": "Endpoint not found"})
-
-        except Exception as e:
-            self._send_json(500, {"status": "error", "message": str(e)})
-
-    def _send_json(self, code, data):
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-goog-api-key')
-        self.end_headers()
-        self.wfile.write(json.dumps(data, indent=2).encode('utf-8'))
+# Entrypoint for Vercel
+handler = app
