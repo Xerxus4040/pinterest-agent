@@ -3,13 +3,14 @@ import json
 import re
 import urllib.request
 from http.server import BaseHTTPRequestHandler
-from google import genai
 
 # Environment Variables from Vercel Dashboard
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 NANO_BANANA_API_KEY = os.environ.get('NANO_BANANA_API_KEY', '')
-# Replace with your actual Nano Banana / Image Model Endpoint
 NANO_BANANA_API_URL = os.environ.get('NANO_BANANA_API_URL', 'https://api.vyce.ai/v1/models/nano-banana/generate')
+
+# Direct Standard Endpoint for Gemini 3.7 Flash
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 
 USER_TENANTS = {}
 
@@ -25,16 +26,15 @@ def extract_folder_id(drive_url):
 
 def generate_nano_banana_image(prompt, image_url=None):
     """
-    Calls Nano Banana Model for Image Generation or Style Transfer.
-    If NANO_BANANA_API_KEY is not set, falls back to the provided image_url.
+    Calls Nano Banana Model for Image Generation.
+    Falls back gracefully if API Key is not set.
     """
     if not NANO_BANANA_API_KEY:
-        # Fallback if Nano Banana API key isn't provided: return input image or placeholder
         return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Nano+Banana+Image"
 
     payload = {
         "prompt": prompt,
-        "aspect_ratio": "2:3",  # Pinterest optimal vertical ratio
+        "aspect_ratio": "2:3",
         "init_image": image_url
     }
 
@@ -49,43 +49,57 @@ def generate_nano_banana_image(prompt, image_url=None):
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=25) as response:
             res = json.loads(response.read().decode('utf-8'))
             return res.get('image_url', res.get('output', ''))
-    except Exception as e:
-        print(f"Nano Banana API Error: {str(e)}")
+    except Exception:
         return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Generation+Failed"
 
 def generate_gemini_metadata(prompt_text):
-    """Calls Gemini 3.7 Flash for SEO Metadata Generation"""
+    """Calls Gemini 3.7 Flash via REST API without third-party dependencies"""
     if not GEMINI_API_KEY:
         return {
             "status": "error",
             "message": "GEMINI_API_KEY missing in Vercel Environment Variables."
         }
 
+    formatted_prompt = (
+        f"Create high-converting Pinterest Pin SEO metadata for: '{prompt_text}'. "
+        "Return strictly valid raw JSON only without markdown formatting. "
+        "JSON structure: "
+        "{\"title\": \"Catchy title under 100 chars\", "
+        "\"description\": \"Engaging description under 500 chars with CTA\", "
+        "\"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\"]}"
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": formatted_prompt}
+                ]
+            }
+        ]
+    }
+
+    req = urllib.request.Request(
+        f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+        data=json.dumps(payload).encode('utf-8'),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-
-        formatted_prompt = (
-            f"Create high-converting Pinterest Pin SEO metadata for: '{prompt_text}'. "
-            "Return strictly valid raw JSON only without markdown codeblocks or formatting. "
-            "JSON structure: "
-            "{\"title\": \"Catchy title under 100 chars\", "
-            "\"description\": \"Engaging description under 500 chars with call to action\", "
-            "\"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\"]}"
-        )
-
-        response = client.models.generate_content(
-            model='gemini-3.7-flash',
-            contents=formatted_prompt,
-        )
-
-        cleaned_text = response.text.replace('```json', '').replace('```', '').strip()
-        return {"status": "success", "data": json.loads(cleaned_text)}
-
+        with urllib.request.urlopen(req, timeout=25) as response:
+            res_json = json.loads(response.read().decode('utf-8'))
+            ai_raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
+            cleaned_text = ai_raw_text.replace('```json', '').replace('```', '').strip()
+            return {"status": "success", "data": json.loads(cleaned_text)}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8') if e.fp else str(e)
+        return {"status": "error", "message": f"Gemini HTTP {e.code}: {err_body}"}
     except Exception as e:
-        return {"status": "error", "message": f"Gemini Error: {str(e)}"}
+        return {"status": "error", "message": f"Gemini REST Error: {str(e)}"}
 
 class handler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
@@ -103,7 +117,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        res = {"status": "success", "message": "Dual-Engine Pipeline Ready (Nano Banana + Gemini 3.7 Flash)"}
+        res = {"status": "success", "message": "Backend Live with REST Pipeline (Nano Banana + Gemini 3.7 Flash)"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
 
     def do_POST(self):
@@ -142,14 +156,11 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # Action 2: Multi-Model Processing (Nano Banana + Gemini 3.7 Flash)
+        # Action 2: Process Metadata and Image
         if action in ['generate_pin', 'generate_metadata'] or prompt:
             req_prompt = prompt if prompt else "Modern living room home decor"
 
-            # 1. Image Generation via Nano Banana
             generated_img = generate_nano_banana_image(req_prompt, image_url)
-
-            # 2. Text/SEO Generation via Gemini 3.7 Flash
             ai_seo = generate_gemini_metadata(req_prompt)
 
             if ai_seo.get("status") == "success":
