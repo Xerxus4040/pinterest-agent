@@ -1,19 +1,2 @@
-import { NextRequest } from "next/server";
-
-export async function GET(request: NextRequest) {
-  const code = request.nextUrl.searchParams.get("code");
-
-  if (!code) {
-    return new Response("Missing Pinterest authorization code.", { status: 400 });
-  }
-
-  // TODO Phase 2:
-  // 1. Validate OAuth state against the signed-in user.
-  // 2. Exchange code at https://api.pinterest.com/v5/oauth/token.
-  // 3. Encrypt/store access + refresh tokens in the database.
-  // 4. Redirect to the Connections page.
-  return Response.json({
-    ok: true,
-    message: "Pinterest callback received. Token exchange is the next implementation step.",
-  });
-}
+import {loadStore,saveStore,log} from "@/lib/store";import {exchange,pfetch} from "@/lib/pinterest";
+export async function GET(r:Request){try{const u=new URL(r.url);const code=u.searchParams.get("code"),state=u.searchParams.get("state");if(!code||!state)throw new Error("Missing OAuth code/state");const {studentId}=JSON.parse(Buffer.from(state,"base64url").toString());const s=await loadStore();const st=s.students.find(x=>x.id===studentId);if(!st)throw new Error("Student not found");const tok=await exchange(code);st.pinterest={connected:true,accessToken:tok.accessToken,refreshToken:tok.refreshToken,expiresAt:tok.expiresAt};const me=await pfetch(st,"/user_account");if(me.ok){const j=await me.json();st.pinterest.username=j.username}log(s,`${st.name}: Pinterest connected`);await saveStore(s);return Response.redirect(new URL("/",r.url))}catch(e){return new Response(`Pinterest connection failed: ${e instanceof Error?e.message:"Unknown error"}`,{status:500})}}
