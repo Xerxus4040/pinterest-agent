@@ -87,6 +87,9 @@ class Job(Base):
 
 Base.metadata.create_all(engine)
 
+# Vercel Python runtime entrypoint: it looks for a top-level variable named `app`.
+app = APP
+
 INDEX_HTML = r"""
 <!doctype html>
 <html>

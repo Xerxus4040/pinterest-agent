@@ -1,12 +1,8 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "app.py", "use": "@vercel/python" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "app.py" }
-  ],
   "crons": [
-    { "path": "/api/cron/process-one", "schedule": "0 3 * * *" }
+    {
+      "path": "/api/cron/process-one",
+      "schedule": "0 3 * * *"
+    }
   ]
 }
