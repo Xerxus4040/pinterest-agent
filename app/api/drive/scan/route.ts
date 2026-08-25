@@ -1,0 +1,2 @@
+import {isAuthed} from "@/lib/auth";import {scanPublicFolder} from "@/lib/drive";
+export async function POST(r:Request){if(!(await isAuthed()))return Response.json({error:"Unauthorized"},{status:401});try{const {url}=await r.json();const files=await scanPublicFolder(url);return Response.json({ok:true,count:files.length,files})}catch(e){return Response.json({ok:false,error:e instanceof Error?e.message:"Scan failed"},{status:400})}}
