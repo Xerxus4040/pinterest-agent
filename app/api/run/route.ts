@@ -1,0 +1,2 @@
+import {isAuthed} from "@/lib/auth";import {loadStore} from "@/lib/store";import {processStudent} from "@/lib/agent";
+export async function POST(r:Request){if(!(await isAuthed()))return Response.json({error:"Unauthorized"},{status:401});const {studentId}=await r.json();const s=await loadStore();const st=s.students.find(x=>x.id===studentId);if(!st)return Response.json({error:"Student not found"},{status:404});await processStudent(s,st);return Response.json({ok:true})}
