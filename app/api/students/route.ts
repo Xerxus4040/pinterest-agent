@@ -12,19 +12,23 @@ export async function POST(request: Request) {
     const driveUrl = String(body.driveUrl ?? "").trim();
 
     if (!name || !driveUrl) {
-      return NextResponse.json({ error: "name and driveUrl are required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "name and driveUrl are required" },
+        { status: 400 }
+      );
     }
 
-    const mode: "auto" | "approval" = body.mode === "auto" ? "auto" : "approval";
-
     const student = createStudent({
+      id: crypto.randomUUID(),
       name,
       driveUrl,
       active: body.active !== false,
-      mode,
+      mode: body.mode === "auto" ? "auto" : "approval",
       postsPerDay: Math.max(1, Number(body.postsPerDay ?? 1)),
       postHour: Math.min(23, Math.max(0, Number(body.postHour ?? 20))),
       timezone: String(body.timezone ?? "Asia/Karachi"),
+      processedSourceIds: [],
+      createdAt: new Date().toISOString(),
     });
 
     return NextResponse.json({ student }, { status: 201 });
