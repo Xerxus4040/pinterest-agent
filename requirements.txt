@@ -1,8 +1,0 @@
-Flask>=3.1,<4
-requests>=2.32,<3
-SQLAlchemy>=2.0,<3
-psycopg[binary]>=3.2,<4
-cryptography>=44,<46
-google-genai>=1.30,<2
-Pillow>=11,<12
-gunicorn>=23,<24
