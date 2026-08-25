@@ -1,3 +1,37 @@
-import {isAuthed} from "@/lib/auth";import {loadStore,saveStore,log} from "@/lib/store";
-export async function GET(){if(!(await isAuthed()))return Response.json({error:"Unauthorized"},{status:401});const s=await loadStore();return Response.json({students:s.students,approvals:s.approvals,logs:s.logs.slice(0,30)})}
-export async function POST(r:Request){if(!(await isAuthed()))return Response.json({error:"Unauthorized"},{status:401});const b=await r.json();if(!b.name||!b.driveUrl)return Response.json({error:"name and driveUrl required"},{status:400});const s=await loadStore();const st={id:crypto.randomUUID(),name:b.name,driveUrl:b.driveUrl,active:true,mode:"approval",postsPerDay:1,postHour:20,timezone:"Asia/Karachi",processedSourceIds:[],createdAt:new Date().toISOString()};s.students.push(st);log(s,`Added student ${st.name}`);await saveStore(s);return Response.json(st)}
+import { NextResponse } from "next/server";
+import { createStudent, listStudents } from "@/lib/store";
+
+export async function GET() {
+  return NextResponse.json({ students: listStudents() });
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const name = String(body.name ?? "").trim();
+    const driveUrl = String(body.driveUrl ?? "").trim();
+
+    if (!name || !driveUrl) {
+      return NextResponse.json({ error: "name and driveUrl are required" }, { status: 400 });
+    }
+
+    const mode: "auto" | "approval" = body.mode === "auto" ? "auto" : "approval";
+
+    const student = createStudent({
+      name,
+      driveUrl,
+      active: body.active !== false,
+      mode,
+      postsPerDay: Math.max(1, Number(body.postsPerDay ?? 1)),
+      postHour: Math.min(23, Math.max(0, Number(body.postHour ?? 20))),
+      timezone: String(body.timezone ?? "Asia/Karachi"),
+    });
+
+    return NextResponse.json({ student }, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to create student" },
+      { status: 500 }
+    );
+  }
+}
