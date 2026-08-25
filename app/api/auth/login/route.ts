@@ -1,0 +1,2 @@
+import {NextRequest,NextResponse} from "next/server";import {makeSession,validPassword} from "@/lib/auth";
+export async function POST(r:NextRequest){const {password}=await r.json();if(!validPassword(password))return Response.json({ok:false,error:"Invalid password"},{status:401});const x=NextResponse.json({ok:true});x.cookies.set("pinpilot_session",makeSession(),{httpOnly:true,sameSite:"lax",secure:true,path:"/",maxAge:604800});return x}
