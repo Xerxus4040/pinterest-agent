@@ -1,18 +1,2 @@
-import { NextRequest } from "next/server";
-
-export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-
-  if (secret && auth !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
-  // Phase 1: scheduler health check only.
-  // Phase 2 will load due jobs from the database and enqueue AI/Pinterest work.
-  return Response.json({
-    ok: true,
-    message: "Cron endpoint reached. Automation workers are not enabled yet.",
-    timestamp: new Date().toISOString(),
-  });
-}
+import {NextRequest} from "next/server";import {loadStore,saveStore,log} from "@/lib/store";import {processStudent,publishApproval} from "@/lib/agent";
+export async function GET(r:NextRequest){const secret=process.env.CRON_SECRET;if(secret&&r.headers.get("authorization")!==`Bearer ${secret}`)return new Response("Unauthorized",{status:401});const s=await loadStore();const now=new Date();for(const st of s.students){if(!st.active)continue;const localHour=Number(new Intl.DateTimeFormat("en-US",{timeZone:st.timezone,hour:"2-digit",hour12:false}).format(now));if(localHour!==st.postHour)continue;try{await processStudent(s,st)}catch(e){log(s,`${st.name}: ${e instanceof Error?e.message:"processing failed"}`,false)}}await saveStore(s);return Response.json({ok:true,at:now.toISOString()})}
