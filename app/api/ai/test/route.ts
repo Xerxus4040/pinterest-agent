@@ -1,20 +1,2 @@
-import { getGeminiClient, GEMINI_TEXT_MODEL } from "@/lib/gemini";
-
-export async function POST() {
-  try {
-    const ai = getGeminiClient();
-
-    const response = await ai.models.generateContent({
-      model: GEMINI_TEXT_MODEL,
-      contents: "Reply with exactly: GEMINI_CONNECTION_OK",
-    });
-
-    return Response.json({ ok: true, text: response.text });
-  } catch (error) {
-    console.error(error);
-    return Response.json(
-      { ok: false, error: "Gemini connection failed." },
-      { status: 500 }
-    );
-  }
-}
+import {isAuthed} from "@/lib/auth";import {loadStore,saveStore} from "@/lib/store";import {analyzeAndGenerate} from "@/lib/agent";import {scanPublicFolder} from "@/lib/drive";
+export async function POST(r:Request){if(!(await isAuthed()))return Response.json({error:"Unauthorized"},{status:401});try{const {studentId}=await r.json();const s=await loadStore();const st=s.students.find(x=>x.id===studentId);if(!st)return Response.json({error:"Student not found"},{status:404});const files=await scanPublicFolder(st.driveUrl);const next=files.find(f=>!st.processedSourceIds.includes(f.id));if(!next)return Response.json({error:"No new source image found"},{status:404});const a=await analyzeAndGenerate(st,next);st.processedSourceIds.push(next.id);s.approvals.unshift(a);await saveStore(s);return Response.json({ok:true,approval:a})}catch(e){return Response.json({error:e instanceof Error?e.message:"Generation failed"},{status:500})}}
