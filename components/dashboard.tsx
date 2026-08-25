@@ -1,114 +1,22 @@
 "use client";
-
-import { useState } from "react";
-
-const activity = [
-  ["Student 01", "Modern 3 Bedroom Plan", "Waiting approval"],
-  ["Student 02", "Small House Blueprint", "Published"],
-  ["Student 03", "Minimal Villa Plan", "Processing"],
-  ["Student 04", "2 Bedroom Floor Plan", "Published"],
-];
-
-export default function Dashboard() {
-  const [mode, setMode] = useState<"approval" | "auto">("approval");
-
-  return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="logo">◈ PinPilot AI</div>
-        <nav className="nav">
-          <a className="active" href="#">Overview</a>
-          <a href="#queue">Approval Queue</a>
-          <a href="#students">Students</a>
-          <a href="#connections">Connections</a>
-          <a href="#ai">AI Settings</a>
-          <a href="#scheduler">Scheduler</a>
-          <a href="#logs">Activity & Logs</a>
-        </nav>
-      </aside>
-
-      <main className="main">
-        <div className="topbar">
-          <div>
-            <div className="title">AI Pinterest Agent</div>
-            <div className="sub">Blueprint → creative → SEO → approval → Pinterest</div>
-          </div>
-          <div className="pill">System <b>● Online</b></div>
-        </div>
-
-        <div className="banner">
-          <b>Testing mode:</b> Human Approval is ON. The agent can prepare content,
-          but it will not publish until you approve it. Switch to Fully Automatic only
-          after testing is complete.
-        </div>
-
-        <section className="grid4">
-          <div className="card"><div className="label">Active Students</div><div className="metric">10</div></div>
-          <div className="card"><div className="label">Pins Today</div><div className="metric">12</div></div>
-          <div className="card"><div className="label">Pending Approval</div><div className="metric">4</div></div>
-          <div className="card"><div className="label">Success Rate</div><div className="metric">98.2%</div></div>
-        </section>
-
-        <div className="grid2">
-          <section className="card" id="connections">
-            <div className="section-title">Connections</div>
-            <div className="row">
-              <div><b>Pinterest</b><div className="help">OAuth connection</div></div>
-              <span className="status ok">Ready</span>
-            </div>
-            <div className="row">
-              <div><b>Google Drive</b><div className="help">Public/shared source folder</div></div>
-              <span className="status ok">Ready</span>
-            </div>
-            <div className="row">
-              <div><b>Gemini</b><div className="help">Server-side API key</div></div>
-              <span className="status ok">Configured</span>
-            </div>
-          </section>
-
-          <section className="card" id="ai">
-            <div className="section-title">Automation Mode</div>
-            <div className="form">
-              <label className="row">
-                <span><b>Human Approval</b><div className="help">Recommended for testing</div></span>
-                <input type="radio" checked={mode === "approval"} onChange={() => setMode("approval")} />
-              </label>
-              <label className="row">
-                <span><b>Fully Automatic</b><div className="help">Publish after QA without approval</div></span>
-                <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} />
-              </label>
-              <div className="help">
-                Current mode: <b>{mode === "approval" ? "Human Approval" : "Fully Automatic"}</b>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <section className="card" id="queue" style={{marginTop:18}}>
-          <div className="section-title">Recent Agent Activity</div>
-          {activity.map(([student, item, status]) => (
-            <div className="row" key={student}>
-              <div>
-                <b>{student}</b>
-                <div className="help">{item}</div>
-              </div>
-              <span className={`status ${status === "Published" ? "ok" : "wait"}`}>{status}</span>
-            </div>
-          ))}
-        </section>
-
-        <section className="card" id="scheduler" style={{marginTop:18}}>
-          <div className="section-title">Scheduler Preview</div>
-          <div className="row">
-            <div><b>Daily publishing window</b><div className="help">Asia/Karachi · 8:00 PM</div></div>
-            <span className="status ok">Enabled</span>
-          </div>
-          <div className="help">
-            The production scheduler will run server-side, so a student does not need
-            to keep this dashboard open.
-          </div>
-        </section>
-      </main>
-    </div>
-  );
-}
+import {useEffect,useState} from "react";
+type Student=any;type Approval=any;
+export default function Dashboard(){
+ const [authed,setAuthed]=useState<boolean|null>(null),[password,setPassword]=useState(""),[students,setStudents]=useState<Student[]>([]),[approvals,setApprovals]=useState<Approval[]>([]),[name,setName]=useState(""),[drive,setDrive]=useState(""),[msg,setMsg]=useState("");
+ async function load(){const r=await fetch("/api/me");const j=await r.json();setAuthed(j.authed);if(j.authed){const x=await fetch("/api/students");const d=await x.json();setStudents(d.students||[]);setApprovals(d.approvals||[])}}useEffect(()=>{load()},[]);
+ async function login(){const r=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});if(r.ok)load();else setMsg("Invalid admin password")}
+ async function add(){const r=await fetch("/api/students",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,driveUrl:drive})});const j=await r.json();if(!r.ok){setMsg(j.error);return}setName("");setDrive("");setMsg("Student added");load()}
+ async function act(url:string,body:any){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)setMsg(j.error||"Error");else setMsg("Done");load()}
+ async function patch(id:string,b:any){await fetch(`/api/students/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});load()}
+ if(authed===null)return <div className="login">Loading…</div>;
+ if(!authed)return <div className="login"><div className="card"><div className="h1">PinPilot AI</div><p className="muted">Admin login</p><input className="input" type="password" placeholder="Admin password" value={password} onChange={e=>setPassword(e.target.value)}/><button className="btn primary" style={{marginTop:10,width:"100%"}} onClick={login}>Login</button><p className="small">{msg}</p></div></div>;
+ return <div className="layout"><aside className="side"><div className="brand">◈ PinPilot AI</div><nav className="nav"><a className="on" href="#overview">Overview</a><a href="#students">Students</a><a href="#queue">Approval Queue</a><a href="#connections">Pinterest & Drive</a><a href="#logs">Logs</a></nav><button className="btn secondary" style={{margin:"20px 10px"}} onClick={async()=>{await fetch("/api/auth/logout",{method:"POST"});load()}}>Logout</button></aside>
+ <main className="main"><div className="head"><div><div className="h1">AI Pinterest Agent</div><div className="muted">Google Drive → Gemini → Nano Banana → Pinterest</div></div><span className="badge">Human Approval ON</span></div>
+ {msg&&<div className="notice">{msg}</div>}
+ <section className="grid" id="overview"><div className="card"><div className="label">Students</div><div className="metric">{students.length}</div></div><div className="card"><div className="label">Pending</div><div className="metric">{approvals.filter(a=>a.status==="pending").length}</div></div><div className="card"><div className="label">Published</div><div className="metric">{approvals.filter(a=>a.status==="published").length}</div></div><div className="card"><div className="label">AI</div><div className="metric">Online</div></div></section>
+ <section className="card" id="students" style={{marginTop:16}}><div className="title">Add Student</div><div className="grid2"><input className="input" placeholder="Student name" value={name} onChange={e=>setName(e.target.value)}/><input className="input" placeholder="Public Google Drive folder URL" value={drive} onChange={e=>setDrive(e.target.value)}/></div><div className="actions" style={{marginTop:10}}><button className="btn primary" onClick={add}>Add Student</button>{drive&&<button className="btn secondary" onClick={async()=>{const r=await fetch("/api/drive/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:drive})});const j=await r.json();setMsg(j.ok?`Drive scan found ${j.count} image(s)`:j.error)}}>Test Drive Folder</button>}</div></section>
+ <section className="card" id="connections" style={{marginTop:16}}><div className="title">Students & Connections</div>{students.map(st=><div className="card" key={st.id} style={{marginTop:10,borderRadius:12}}><div className="row" style={{border:0}}><div><b>{st.name}</b><div className="small">{st.driveUrl}</div></div><span className={st.active?"badge":"badge err"}>{st.active?"ACTIVE":"OFF"}</span></div><div className="actions"><a className="btn secondary" href={`/api/pinterest/connect?studentId=${st.id}`}>Connect Pinterest</a><button className="btn secondary" onClick={async()=>{const r=await fetch(`/api/pinterest/boards?studentId=${st.id}`);const j=await r.json();if(j.items?.length){const b=j.items[0];patch(st.id,{boardId:b.id,boardName:b.name});setMsg(`Selected first board: ${b.name}`)}else setMsg(j.error||"No boards")}}>Load First Board</button><button className="btn secondary" onClick={()=>act("/api/ai/generate",{studentId:st.id})}>Generate Next Pin</button><button className="btn primary" onClick={()=>act("/api/run",{studentId:st.id})}>Run Agent</button><button className="btn secondary" onClick={()=>patch(st.id,{mode:st.mode==="approval"?"auto":"approval"})}>{st.mode==="approval"?"Switch to Auto":"Switch to Approval"}</button></div><div className="small" style={{marginTop:8}}>Pinterest: {st.pinterest?.connected?`Connected @${st.pinterest.username||"account"}`:"Not connected"} · Board: {st.boardName||"Not selected"} · Mode: {st.mode} · Time: {st.postHour}:00 {st.timezone}</div></div>)}</section>
+ <section className="card" id="queue" style={{marginTop:16}}><div className="title">Approval Queue</div>{approvals.length===0?<div className="muted">No generated Pins yet.</div>:approvals.map(a=><div className="queue card" key={a.id} style={{marginTop:10}}><img className="preview" src={a.imageUrl}/><div><div className="title">{a.title}</div><p className="small">{a.description}</p><p className="small"><b>Tags:</b> {a.tags?.join(", ")}</p><span className={`badge ${a.status==="pending"?"warn":a.status==="failed"?"err":""}`}>{a.status}</span><div className="actions" style={{marginTop:14}}>{a.status==="pending"&&<><button className="btn primary" onClick={()=>act("/api/approval",{id:a.id,action:"approve"})}>✓ Approve & Publish</button><button className="btn danger" onClick={()=>act("/api/approval",{id:a.id,action:"reject"})}>Reject</button></>}</div></div></div>)}</section>
+ <section className="card" id="logs" style={{marginTop:16}}><div className="title">Activity</div>{students.map(s=><div className="row" key={s.id}><div><b>{s.name}</b><div className="small">Last run: {s.lastRun||"Never"}</div></div></div>)}</section>
+ </main></div>
+   }
