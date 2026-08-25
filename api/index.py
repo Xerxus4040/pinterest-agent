@@ -7,12 +7,13 @@ import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-# Single Google AI Studio API Key from Vercel Dashboard
+# API Keys from Vercel Dashboard
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+NANO_BANANA_API_KEY = os.environ.get('NANO_BANANA_API_KEY', '')
 
-# Google AI Studio REST Endpoints
+# Endpoints
 GEMINI_37_FLASH_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
-IMAGEN_3_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
+VYCE_AI_URL = "https://api.vyce.ai/v1/models/nano-banana/generate"
 
 # ---------------------------------------------------------
 # 1. Google Drive Helper
@@ -28,51 +29,46 @@ def extract_folder_id(drive_url):
     return drive_url
 
 # ---------------------------------------------------------
-# 2. Google Imagen 3 Model Generator (Using Single Google Key)
+# 2. Vyce AI / Grok Imagine Image Generator
 # ---------------------------------------------------------
 def generate_ai_image(prompt, image_url=None):
-    """Generates High-Quality Aesthetic Images using Google Imagen 3 API"""
-    if not GEMINI_API_KEY:
-        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Missing+Google+API+Key"
-
-    endpoint = f"{IMAGEN_3_URL}?key={GEMINI_API_KEY}"
+    """Calls Vyce AI (Grok Imagine 2) API using NANO_BANANA_API_KEY"""
+    if not NANO_BANANA_API_KEY:
+        # Fallback to Pollinations if key is missing in env
+        clean_prompt = re.sub(r'[^a-zA-Z0-9\s]', '', prompt)
+        formatted_prompt = urllib.parse.quote(f"aesthetic professional Pinterest photography of {clean_prompt}")
+        seed = random.randint(1000, 99999)
+        return f"https://pollinations.ai/p/{formatted_prompt}?width=1000&height=1500&seed={seed}&model=flux"
 
     payload = {
-        "instances": [
-            {"prompt": f"A aesthetic, highly detailed, professional Pinterest photography of: {prompt}, 8k resolution, vertical ratio"}
-        ],
-        "parameters": {
-            "sampleCount": 1,
-            "aspectRatio": "3:4"
-        }
+        "prompt": f"Aesthetic high quality Pinterest photography: {prompt}",
+        "aspect_ratio": "2:3"
     }
+    if image_url:
+        payload["image_url"] = image_url
 
     req = urllib.request.Request(
-        endpoint,
+        VYCE_AI_URL,
         data=json.dumps(payload).encode('utf-8'),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {NANO_BANANA_API_KEY}"
+        },
         method="POST"
     )
 
     try:
         with urllib.request.urlopen(req, timeout=35) as response:
             res = json.loads(response.read().decode('utf-8'))
-            predictions = res.get('predictions', [])
-            
-            if predictions and 'bytesBase64Encoded' in predictions[0]:
-                base64_data = predictions[0]['bytesBase64Encoded']
-                return f"data:image/jpeg;base64,{base64_data}"
-            elif predictions and 'gcsUri' in predictions[0]:
-                return predictions[0]['gcsUri']
-            elif predictions and 'mimeType' in predictions[0]:
-                # Fallback format handling
-                b64 = predictions[0].get('bytesBase64Encoded', '')
-                return f"data:image/png;base64,{b64}"
-                
-            return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Imagen+Generated"
+            img = res.get('image_url') or res.get('output') or (res.get('data', [{}])[0].get('url'))
+            if img:
+                return img
+            # Fallback if no URL returned
+            return f"https://pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1000&height=1500"
     except Exception as e:
-        print(f"Imagen 3 API Error: {e}")
-        return image_url if image_url else "https://via.placeholder.com/1000x1500.png?text=Generation+Failed"
+        print(f"Vyce AI Generation Error: {e}")
+        # Secondary fallback
+        return f"https://pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1000&height=1500"
 
 # ---------------------------------------------------------
 # 3. Gemini 3.7 Flash SEO Metadata Generator
@@ -81,7 +77,7 @@ def generate_gemini_metadata(prompt_text):
     """Calls Gemini 3.7 Flash REST API for SEO text and hashtags"""
     if not GEMINI_API_KEY:
         return {
-            "title": "Stunning Pinterest Design Inspiration",
+            "title": f"Minimalist {prompt_text} Ideas",
             "description": f"Explore creative design ideas for {prompt_text}. Perfect for home decor! #HomeDecor #Design",
             "hashtags": ["#HomeDecor", "#Design", "#Inspiration"]
         }
@@ -207,7 +203,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        res = {"status": "success", "message": "All Systems Operational (Gemini 3.7 Flash + Google Imagen 3 + Pinterest Engine)"}
+        res = {"status": "success", "message": "All Systems Operational (Gemini 3.7 Flash + Vyce AI + Pinterest Engine)"}
         self.wfile.write(json.dumps(res).encode('utf-8'))
 
     def do_POST(self):
@@ -231,7 +227,7 @@ class handler(BaseHTTPRequestHandler):
         prompt = payload.get('prompt', 'Modern Home Interior').strip()
         images_batch = payload.get('images_batch', [])
 
-        # ACTION 1: Fetch Pinterest Boards Automatically
+        # ACTION 1: Fetch Pinterest Boards
         if action == "fetch_boards":
             boards = fetch_user_pinterest_boards(sess)
             res = {"status": "success", "action": "fetch_boards", "boards": boards}
@@ -245,17 +241,13 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
 
-        # ACTION 3: Generate Single Pin (cURL / Extension Test Endpoint)
+        # ACTION 3: Generate Single Pin (cURL / Extension Endpoint)
         if action == "generate_pin":
             sketch_url = payload.get("image_url", None)
             
-            # Step A: Google Imagen 3 Image Generation
             rendered_image = generate_ai_image(prompt, sketch_url)
-
-            # Step B: Gemini 3.7 Flash SEO Generation
             seo_data = generate_gemini_metadata(prompt)
 
-            # Step C: Optional Auto-Post if Session & Board provided
             post_result = None
             if sess and board_id:
                 title = seo_data.get("title", "")
