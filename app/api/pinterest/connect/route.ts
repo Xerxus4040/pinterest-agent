@@ -1,26 +1,2 @@
-import { NextRequest } from "next/server";
-
-export async function GET(request: NextRequest) {
-  const clientId = process.env.PINTEREST_CLIENT_ID;
-  const redirectUri = process.env.PINTEREST_REDIRECT_URI;
-
-  if (!clientId || !redirectUri) {
-    return Response.json(
-      { ok: false, error: "Pinterest OAuth environment variables are missing." },
-      { status: 500 }
-    );
-  }
-
-  const state = crypto.randomUUID();
-  const scope = "boards:read boards:write pins:read pins:write";
-
-  const url = new URL("https://www.pinterest.com/oauth/");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", scope);
-  url.searchParams.set("state", state);
-
-  // TODO: Persist state against the signed-in user/session before redirecting.
-  return Response.redirect(url);
-}
+import {isAuthed} from "@/lib/auth";import {authUrl} from "@/lib/pinterest";
+export async function GET(r:Request){if(!(await isAuthed()))return new Response("Unauthorized",{status:401});const u=new URL(r.url);const studentId=u.searchParams.get("studentId");if(!studentId)return new Response("studentId required",{status:400});const state=Buffer.from(JSON.stringify({studentId,nonce:crypto.randomUUID()})).toString("base64url");const res=Response.redirect(authUrl(state));return res}
